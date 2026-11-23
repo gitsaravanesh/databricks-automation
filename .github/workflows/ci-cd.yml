@@ -1,0 +1,90 @@
+# CI/CD for the bronze_silver bundle (GitHub Actions)
+#
+#   Pull request to main : lint + tests -> deploy to test -> run the job once (smoke test)
+#   Push to main         : lint + tests -> wait for approval -> deploy to prod
+#   Manual run           : Actions tab -> CI/CD -> Run workflow -> choose test or prod
+#
+# One-time setup (repo Settings > Environments):
+#   1. Create environments "test" and "production".
+#   2. In each, add secrets DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET
+#      for that environment's Databricks service principal.
+#   3. On "production": add Required reviewers (the approval step) and limit
+#      Deployment branches to main.
+# The workspace URL comes from the target in databricks.yml.
+
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Bundle target to deploy
+        type: choice
+        options: [test, prod]
+        default: test
+
+permissions:
+  contents: read
+
+# A new push to the same pull request cancels the older run; deploys from main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest ruff pyarrow
+      - run: ruff check src tests scripts
+      - run: pytest -q
+
+  deploy-test:
+    name: Deploy to test and smoke test
+    needs: checks
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'test')
+    runs-on: ubuntu-latest
+    environment: test
+    concurrency:
+      group: deploy-test          # the test target is shared: one deploy at a time
+      cancel-in-progress: false
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main    # pin to a release tag for repeatable builds
+      - run: databricks bundle validate -t test
+      - run: databricks bundle deploy -t test
+      - run: databricks bundle run -t test bronze_silver_job
+
+  deploy-prod:
+    name: Deploy to production
+    needs: checks
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'prod')
+    runs-on: ubuntu-latest
+    environment: production         # Required reviewers make this job wait for approval
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle validate -t prod
+      - run: databricks bundle deploy -t prod

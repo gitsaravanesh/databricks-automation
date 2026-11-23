@@ -1,0 +1,15 @@
+# The job that runs the pipeline on a schedule.
+# In the dev target, development mode pauses the schedule.
+
+resources:
+  jobs:
+    bronze_silver_job:
+      name: bronze_silver_job
+      tasks:
+        - task_key: refresh_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_silver.id}
+            full_refresh: false             # normal incremental run
+      schedule:
+        quartz_cron_expression: "0 30 1 * * ?"   # 01:30 every day
+        timezone_id: Asia/Kolkata

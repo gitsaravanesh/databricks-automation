@@ -1,0 +1,20 @@
+[project]
+name = "bronze-silver"
+version = "0.1.0"
+description = "Spark Declarative Pipeline: landing Parquet -> bronze -> silver"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "pyarrow>=15", "pandas>=2"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src/bronze_silver"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+# Provided by Databricks at run time
+builtins = ["spark", "dbutils"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]

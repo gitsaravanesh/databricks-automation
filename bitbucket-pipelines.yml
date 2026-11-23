@@ -1,0 +1,48 @@
+# CI/CD for the bundle.
+#
+# Pull request : lint + unit tests -> deploy to test -> run once as a smoke test
+# Merge to main: lint + unit tests -> (click to approve) -> deploy to prod
+#
+# Sign-in uses a Databricks service principal per environment. Add these as
+# secured deployment variables (Repository settings > Deployments):
+#   DATABRICKS_CLIENT_ID
+#   DATABRICKS_CLIENT_SECRET
+# The workspace URL comes from the target in databricks.yml.
+
+image: python:3.11-slim
+
+definitions:
+  steps:
+    - step: &checks
+        name: Lint and unit tests
+        script:
+          - pip install -q pytest ruff pyarrow
+          - ruff check src tests scripts
+          - pytest -q
+
+pipelines:
+  pull-requests:
+    '**':
+      - step: *checks
+      - step:
+          name: Deploy to test and smoke test
+          deployment: test
+          script:
+            - apt-get update -qq && apt-get install -y -qq curl unzip > /dev/null
+            - curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+            - databricks bundle validate -t test
+            - databricks bundle deploy -t test
+            - databricks bundle run -t test bronze_silver_job
+
+  branches:
+    main:
+      - step: *checks
+      - step:
+          name: Deploy to production
+          deployment: production
+          trigger: manual
+          script:
+            - apt-get update -qq && apt-get install -y -qq curl unzip > /dev/null
+            - curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+            - databricks bundle validate -t prod
+            - databricks bundle deploy -t prod

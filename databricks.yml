@@ -1,0 +1,78 @@
+# Declarative Automation Bundle (formerly Databricks Asset Bundle)
+#
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run      -t dev bronze_silver_job
+
+bundle:
+  name: bronze_silver
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Catalog the pipeline writes to
+  bronze_schema:
+    description: Schema for bronze tables (must already exist)
+  silver_schema:
+    description: Schema for silver tables (must already exist)
+  source_root:
+    description: Landing folder holding one sub-folder per table
+  archive_root:
+    description: Where processed files are moved when clean_source is MOVE
+    default: ""
+  clean_source:
+    description: OFF = leave files in landing; MOVE = move processed files to archive_root
+    default: "OFF"
+  archive_after:
+    description: How long after loading a file is moved (MOVE only)
+    default: "30 days"
+
+targets:
+  # Your own workspace, e.g. Databricks Free Edition.
+  # Development mode prefixes the pipeline and job names with your user name
+  # and pauses the schedule. In a shared workspace, replace "dev" in the schema
+  # names and paths below with your own name so you don't overwrite others.
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://<your-dev-workspace>.cloud.databricks.com
+    variables:
+      catalog: workspace
+      bronze_schema: dev_bronze
+      silver_schema: dev_silver
+      source_root: /Volumes/workspace/dev_bronze/landing/incoming
+      archive_root: /Volumes/workspace/dev_bronze/landing/archive
+
+  # Shared test workspace: deployed by CI on every pull request.
+  test:
+    mode: production
+    workspace:
+      host: https://<your-test-workspace>.cloud.databricks.com
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: sales_test
+      bronze_schema: bronze
+      silver_schema: silver
+      source_root: s3://<test-landing-bucket>/incoming
+      archive_root: s3://<test-landing-bucket>/archive
+    run_as:
+      service_principal_name: <test-service-principal-application-id>
+
+  # Production: deployed by CI after merge to main and approval.
+  prod:
+    mode: production
+    workspace:
+      host: https://<your-prod-workspace>.cloud.databricks.com
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: sales_prod
+      bronze_schema: bronze
+      silver_schema: silver
+      source_root: s3://<prod-landing-bucket>/incoming
+      archive_root: s3://<prod-landing-bucket>/archive
+      clean_source: MOVE
+    run_as:
+      service_principal_name: <prod-service-principal-application-id>
