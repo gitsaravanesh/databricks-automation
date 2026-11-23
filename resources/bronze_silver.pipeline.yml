@@ -7,7 +7,12 @@ resources:
       name: bronze_silver
       catalog: ${var.catalog}
       schema: ${var.bronze_schema}          # default schema; the code uses full table names
-      serverless: true
+      serverless: false                     # classic compute, sized like BG-Test-Cluster
+      clusters:
+        - label: default
+          node_type_id: ${var.pipeline_node_type}
+          driver_node_type_id: ${var.pipeline_node_type}
+          num_workers: ${var.pipeline_num_workers}
       continuous: false                     # triggered: process new data, then stop
       root_path: ../src/bronze_silver       # lets transformations import utilities
       libraries:
