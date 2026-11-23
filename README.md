@@ -55,7 +55,24 @@ add one line to `utilities/tables.py` and put its files in `incoming/<folder>/`.
 
 ---
 
-## Run it on Databricks Free Edition (dev)
+## Workspace and targets
+
+All targets use one Azure Databricks workspace
+(`https://adb-7405612659094971.11.azuredatabricks.net`) and one catalog, set once in
+`databricks.yml` (`variables.catalog`). Each target writes to its own schemas, and its
+landing area is the `landing` volume in its bronze schema:
+
+| Target | Deployed by | Runs as | Schemas | Landing folder |
+|---|---|---|---|---|
+| dev | you, from your laptop | you | dev_bronze / dev_silver | `/Volumes/<catalog>/dev_bronze/landing/incoming` |
+| test | GitHub Actions, on pull requests | service principal | test_bronze / test_silver | `/Volumes/<catalog>/test_bronze/landing/incoming` |
+| prod | GitHub Actions, after merge + approval | service principal | bronze / silver | `/Volumes/<catalog>/bronze/landing/incoming` |
+
+Run `scripts/setup_unity_catalog.sql` once (after replacing `<catalog>` and
+`<sp-application-id>`) to create all schemas and volumes and grant the service
+principal access.
+
+## Run it yourself (dev)
 
 ### 1. One-time setup on your laptop
 
@@ -63,23 +80,13 @@ Install the Databricks CLI (Windows: `winget install Databricks.DatabricksCLI`;
 macOS: `brew tap databricks/tap && brew install databricks`), then log in:
 
 ```bash
-databricks auth login --host https://<your-workspace>.cloud.databricks.com
+databricks auth login --host https://adb-7405612659094971.11.azuredatabricks.net
 databricks current-user me
 ```
 
-Put the same URL in `databricks.yml` under `targets.dev.workspace.host`.
+### 2. Schemas and landing volume
 
-### 2. Create the schemas and the landing volume
-
-In the workspace's SQL editor:
-
-```sql
-CREATE SCHEMA IF NOT EXISTS workspace.dev_bronze;
-CREATE SCHEMA IF NOT EXISTS workspace.dev_silver;
-CREATE VOLUME IF NOT EXISTS workspace.dev_bronze.landing;
-```
-
-(In a shared workspace, use your own name instead of `dev` here and in `databricks.yml`.)
+Created by `scripts/setup_unity_catalog.sql` (see above).
 
 ### 3. Deploy
 
@@ -96,10 +103,10 @@ This creates the pipeline `[dev <you>] bronze_silver` and the job
 Upload the files into the temporary landing area, then run the job:
 
 ```powershell
-.\scripts\upload_batch.ps1 -Batch 1          # Windows
+.\scripts\upload_batch.ps1 -Batch 1 -Catalog <catalog>      # Windows
 ```
 ```bash
-./scripts/upload_batch.sh 1                  # macOS / Linux
+./scripts/upload_batch.sh 1 <catalog>                       # macOS / Linux
 ```
 ```bash
 databricks bundle run -t dev bronze_silver_job
@@ -142,8 +149,8 @@ so a full refresh can't empty it.
 databricks bundle destroy -t dev
 ```
 ```sql
-DROP SCHEMA IF EXISTS workspace.dev_silver CASCADE;
-DROP SCHEMA IF EXISTS workspace.dev_bronze CASCADE;
+DROP SCHEMA IF EXISTS <catalog>.dev_silver CASCADE;
+DROP SCHEMA IF EXISTS <catalog>.dev_bronze CASCADE;
 ```
 
 ---
@@ -171,24 +178,29 @@ One workflow, `.github/workflows/ci-cd.yml`, with three jobs:
 | Manual (Actions → CI/CD → Run workflow) | **checks** → deploy to the target you pick: test or prod |
 
 Setup:
-1. Create a Databricks service principal per environment, with access to the
-   workspace, the catalog and schemas, and `READ FILES` on the landing external
-   location, plus an OAuth secret.
-2. Put its application ID in `targets.<env>.run_as` and the workspace URL in
-   `targets.<env>.workspace.host` in `databricks.yml`.
-3. In GitHub, go to **Settings → Environments** and create `test` and `production`.
-   In each, add the secrets `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`
-   for that environment's service principal.
-4. On `production`, add **Required reviewers** (this is the approval step) and set
-   **Deployment branches** to `main` only, so nothing else can deploy to prod.
+1. In the workspace, create a service principal and an OAuth secret
+   (Settings → Identity and access → Service principals → Manage → Add, then the
+   **Secrets** tab → Generate secret). Copy the client ID and the secret.
+2. Run `scripts/setup_unity_catalog.sql` with its application ID, so it can use the
+   test and prod schemas and volumes.
+3. In GitHub, add the repository secrets `DATABRICKS_CLIENT_ID` and
+   `DATABRICKS_CLIENT_SECRET` (Settings → Secrets and variables → Actions).
+4. Create the environments `test` and `production` (Settings → Environments). On
+   `production`, add **Required reviewers** (the approval step) and limit
+   **Deployment branches** to `main`.
+5. Upload sample batch 1 to the test and prod landing volumes before their first run,
+   so Auto Loader has files to infer the schemas from.
+
+The workspace URL comes from `databricks.yml`. Because GitHub signs in as the service
+principal, test and prod are owned by and run as it. To use separate service
+principals per environment, put the secrets in each environment instead of the
+repository; environment secrets override repository secrets with the same name.
 
 Notes:
 - The test target is shared, so the workflow lets only one test deploy run at a
   time, and the last pull request deployed is what's in test.
 - Pull requests from forks don't receive secrets, so their test deploy fails; this
   setup is meant for a private repo where branches live in the same repo.
-- In test and prod, the schemas, external locations and grants are expected to exist
-  already (typically created with Terraform); the bundle deploys only the pipeline and job.
 
 ### Optional: no stored secret (workload identity federation)
 
@@ -201,7 +213,7 @@ permissions:
   contents: read
 env:
   DATABRICKS_AUTH_TYPE: github-oidc
-  DATABRICKS_HOST: https://<workspace>.cloud.databricks.com
+  DATABRICKS_HOST: https://adb-7405612659094971.11.azuredatabricks.net
   DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}   # not secret anymore: use a variable
 ```
 

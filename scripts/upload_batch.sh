@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Upload one sample batch to the landing volume (macOS / Linux / Git Bash).
+# Upload one sample batch to a landing volume (macOS / Linux / Git Bash).
 #
 # Usage, from the repo root:
-#   ./scripts/upload_batch.sh 1
-#   ./scripts/upload_batch.sh 2 dbfs:/Volumes/workspace/dev_bronze/landing/incoming free
-#                              ^ batch  ^ destination (optional)               ^ CLI profile (optional)
+#   ./scripts/upload_batch.sh 1 <catalog>                 # dev  (dev_bronze)
+#   ./scripts/upload_batch.sh 1 <catalog> test_bronze     # test
+#   ./scripts/upload_batch.sh 1 <catalog> bronze          # prod
+#   ./scripts/upload_batch.sh 1 <catalog> dev_bronze myprofile   # with a CLI profile
 set -euo pipefail
 
-BATCH="${1:?usage: upload_batch.sh <1|2|3> [destination] [profile]}"
-DEST="${2:-dbfs:/Volumes/workspace/dev_bronze/landing/incoming}"
-PROFILE="${3:-}"
+BATCH="${1:?usage: upload_batch.sh <1|2|3> <catalog> [schema] [profile]}"
+CATALOG="${2:?usage: upload_batch.sh <1|2|3> <catalog> [schema] [profile]}"
+SCHEMA="${3:-dev_bronze}"
+PROFILE="${4:-}"
+DEST="dbfs:/Volumes/${CATALOG}/${SCHEMA}/landing/incoming"
 
 SRC=$(ls -d sample_data/batch_0"${BATCH}"_* 2>/dev/null | head -n 1 || true)
 if [ -z "$SRC" ]; then
@@ -26,4 +29,4 @@ for table_dir in "$SRC"/*/; do
     databricks fs cp -r --overwrite "$table_dir" "$DEST/$table"
   fi
 done
-echo "Batch $BATCH uploaded. Now run: databricks bundle run -t dev bronze_silver_job"
+echo "Batch $BATCH uploaded to $DEST"

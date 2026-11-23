@@ -34,19 +34,19 @@ SCD 2 tables keep history: their row count also includes closed versions (`__END
 
 ```sql
 -- Row counts, bronze vs silver
-SELECT 'bronze' AS layer, count(*) FROM workspace.dev_bronze.orders
-UNION ALL SELECT 'silver', count(*) FROM workspace.dev_silver.orders;
+SELECT 'bronze' AS layer, count(*) FROM <catalog>.dev_bronze.orders
+UNION ALL SELECT 'silver', count(*) FROM <catalog>.dev_silver.orders;
 
 -- Order 2 should stay SHIPPED: the late CANCELLED has an older commit time
-SELECT order_id, status, mdb_commit_ts FROM workspace.dev_silver.orders ORDER BY order_id;
+SELECT order_id, status, mdb_commit_ts FROM <catalog>.dev_silver.orders ORDER BY order_id;
 
 -- SCD 2 history for customer 1
 SELECT customer_id, city, email, __START_AT, __END_AT
-FROM workspace.dev_silver.customers WHERE customer_id = 1 ORDER BY __START_AT;
+FROM <catalog>.dev_silver.customers WHERE customer_id = 1 ORDER BY __START_AT;
 
 -- The row with a missing key: in bronze only
-SELECT * FROM workspace.dev_bronze.orders WHERE order_id IS NULL;
+SELECT * FROM <catalog>.dev_bronze.orders WHERE order_id IS NULL;
 
 -- Which file each bronze row came from
-SELECT _source_file, count(*) FROM workspace.dev_bronze.orders GROUP BY _source_file;
+SELECT _source_file, count(*) FROM <catalog>.dev_bronze.orders GROUP BY _source_file;
 ```

@@ -42,6 +42,13 @@ def test_archive_inside_source_is_rejected():
         autoloader_options(get_settings(bad), "orders")
 
 
-def test_move_without_archive_is_rejected():
-    with pytest.raises(ValueError):
-        autoloader_options(get_settings({**BASE, "clean_source": "MOVE", "archive_root": ""}), "orders")
+def test_landing_defaults_to_volume_in_bronze_schema():
+    s = get_settings({"catalog": "main", "bronze_schema": "test_bronze", "silver_schema": "test_silver",
+                      "source_root": "", "archive_root": ""})
+    assert s.source_root == "/Volumes/main/test_bronze/landing/incoming"
+    assert s.archive_root == "/Volumes/main/test_bronze/landing/archive"
+
+
+def test_cloud_storage_paths_are_used_when_given():
+    s = get_settings({**BASE, "source_root": "abfss://landing@acct.dfs.core.windows.net/incoming/"})
+    assert s.source_path("orders") == "abfss://landing@acct.dfs.core.windows.net/incoming/orders/"

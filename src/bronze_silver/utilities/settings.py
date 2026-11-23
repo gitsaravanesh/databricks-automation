@@ -32,13 +32,18 @@ class Settings:
 
 
 def get_settings(conf) -> Settings:
+    catalog = conf.get("catalog")
+    bronze_schema = conf.get("bronze_schema", "bronze")
+    # Default landing area: the "landing" volume in the bronze schema.
+    # Set source_root / archive_root to use cloud storage (s3://, abfss://) instead.
+    landing = f"/Volumes/{catalog}/{bronze_schema}/landing"
     return Settings(
-        source_root=conf.get("source_root").rstrip("/"),
-        catalog=conf.get("catalog"),
-        bronze_schema=conf.get("bronze_schema", "bronze"),
+        source_root=(conf.get("source_root", "") or f"{landing}/incoming").rstrip("/"),
+        catalog=catalog,
+        bronze_schema=bronze_schema,
         silver_schema=conf.get("silver_schema", "silver"),
         clean_source=conf.get("clean_source", "OFF").upper(),
-        archive_root=conf.get("archive_root", "").rstrip("/"),
+        archive_root=(conf.get("archive_root", "") or f"{landing}/archive").rstrip("/"),
         archive_after=conf.get("archive_after", "30 days"),
     )
 

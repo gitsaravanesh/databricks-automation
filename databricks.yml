@@ -3,6 +3,14 @@
 #   databricks bundle validate -t dev
 #   databricks bundle deploy   -t dev
 #   databricks bundle run      -t dev bronze_silver_job
+#
+# All three targets use one Azure Databricks workspace and one catalog; each
+# target writes to its own schemas:
+#   dev  -> dev_bronze  / dev_silver    deployed from your laptop, runs as you
+#   test -> test_bronze / test_silver   deployed by GitHub Actions on pull requests
+#   prod -> bronze      / silver        deployed by GitHub Actions after merge + approval
+# GitHub Actions signs in as the service principal (secrets DATABRICKS_CLIENT_ID /
+# DATABRICKS_CLIENT_SECRET), so test and prod run as that service principal.
 
 bundle:
   name: bronze_silver
@@ -10,69 +18,53 @@ bundle:
 include:
   - resources/*.yml
 
+workspace:
+  host: https://adb-7405612659094971.11.azuredatabricks.net
+
 variables:
   catalog:
-    description: Catalog the pipeline writes to
+    description: Unity Catalog catalog for all targets (check the name in Catalog Explorer)
+    default: <your-catalog>
   bronze_schema:
     description: Schema for bronze tables (must already exist)
   silver_schema:
     description: Schema for silver tables (must already exist)
   source_root:
-    description: Landing folder holding one sub-folder per table
+    description: Landing folder; empty = /Volumes/<catalog>/<bronze_schema>/landing/incoming
+    default: ""
   archive_root:
-    description: Where processed files are moved when clean_source is MOVE
+    description: Archive folder; empty = /Volumes/<catalog>/<bronze_schema>/landing/archive
     default: ""
   clean_source:
-    description: OFF = leave files in landing; MOVE = move processed files to archive_root
+    description: OFF = leave files in landing; MOVE = move processed files to the archive
     default: "OFF"
   archive_after:
     description: How long after loading a file is moved (MOVE only)
     default: "30 days"
 
 targets:
-  # Your own workspace, e.g. Databricks Free Edition.
-  # Development mode prefixes the pipeline and job names with your user name
-  # and pauses the schedule. In a shared workspace, replace "dev" in the schema
-  # names and paths below with your own name so you don't overwrite others.
   dev:
-    mode: development
+    mode: development       # names prefixed with [dev <you>], schedule paused
     default: true
-    workspace:
-      host: https://<your-dev-workspace>.cloud.databricks.com
     variables:
-      catalog: workspace
       bronze_schema: dev_bronze
       silver_schema: dev_silver
-      source_root: /Volumes/workspace/dev_bronze/landing/incoming
-      archive_root: /Volumes/workspace/dev_bronze/landing/archive
 
-  # Shared test workspace: deployed by CI on every pull request.
   test:
     mode: production
     workspace:
-      host: https://<your-test-workspace>.cloud.databricks.com
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    presets:
+      name_prefix: "[test] "          # tell test and prod apart in the same workspace
+      trigger_pause_status: PAUSED    # CI runs it; no daily schedule in test
     variables:
-      catalog: sales_test
-      bronze_schema: bronze
-      silver_schema: silver
-      source_root: s3://<test-landing-bucket>/incoming
-      archive_root: s3://<test-landing-bucket>/archive
-    run_as:
-      service_principal_name: <test-service-principal-application-id>
+      bronze_schema: test_bronze
+      silver_schema: test_silver
 
-  # Production: deployed by CI after merge to main and approval.
   prod:
     mode: production
     workspace:
-      host: https://<your-prod-workspace>.cloud.databricks.com
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
-      catalog: sales_prod
       bronze_schema: bronze
       silver_schema: silver
-      source_root: s3://<prod-landing-bucket>/incoming
-      archive_root: s3://<prod-landing-bucket>/archive
-      clean_source: MOVE
-    run_as:
-      service_principal_name: <prod-service-principal-application-id>

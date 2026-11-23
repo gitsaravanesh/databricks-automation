@@ -4,13 +4,14 @@
 #   Push to main         : lint + tests -> wait for approval -> deploy to prod
 #   Manual run           : Actions tab -> CI/CD -> Run workflow -> choose test or prod
 #
-# One-time setup (repo Settings > Environments):
-#   1. Create environments "test" and "production".
-#   2. In each, add secrets DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET
-#      for that environment's Databricks service principal.
-#   3. On "production": add Required reviewers (the approval step) and limit
-#      Deployment branches to main.
-# The workspace URL comes from the target in databricks.yml.
+# One-time setup in GitHub:
+#   1. Settings > Secrets and variables > Actions: add repository secrets
+#      DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET (the service principal's
+#      client ID and OAuth secret). Environment secrets with the same names override
+#      these, if you use a different service principal per environment.
+#   2. Settings > Environments: create "test" and "production". On "production",
+#      add Required reviewers (the approval step) and limit Deployment branches to main.
+# The workspace URL comes from databricks.yml.
 
 name: CI/CD
 
