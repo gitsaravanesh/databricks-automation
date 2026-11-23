@@ -41,6 +41,12 @@ variables:
   archive_after:
     description: How long after loading a file is moved (MOVE only)
     default: "30 days"
+  pipeline_node_type:
+    description: VM type for the pipeline cluster; set to BG-Test-Cluster's node type
+    default: Standard_DS3_v2
+  pipeline_num_workers:
+    description: Worker count for the pipeline cluster; set to BG-Test-Cluster's worker count
+    default: 1
 
 targets:
   dev:
