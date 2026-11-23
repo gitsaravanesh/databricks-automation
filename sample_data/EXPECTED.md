@@ -1,6 +1,6 @@
 # Expected results
 
-Computed from the sample files. Upload one batch, run the pipeline, compare; then the next batch.
+Computed from the sample files. Upload one batch, run the job, compare; then the next batch.
 
 | Table | SCD | Bronze rows after 1 / 2 / 3 | Silver rows after 1 / 2 / 3 |
 |---|---|---|---|

@@ -4,6 +4,8 @@
 #   databricks bundle deploy   -t dev
 #   databricks bundle run      -t dev bronze_silver_job
 #
+# The job runs on the existing all-purpose cluster BG-Test-Cluster (variable cluster_id).
+#
 # All three targets use one Azure Databricks workspace and one catalog; each
 # target writes to its own schemas:
 #   dev  -> dev_bronze  / dev_silver    deployed from your laptop, runs as you
@@ -41,12 +43,13 @@ variables:
   archive_after:
     description: How long after loading a file is moved (MOVE only)
     default: "30 days"
-  pipeline_node_type:
-    description: VM type for the pipeline cluster; set to BG-Test-Cluster's node type
-    default: Standard_DS3_v2
-  pipeline_num_workers:
-    description: Worker count for the pipeline cluster; set to BG-Test-Cluster's worker count
-    default: 1
+  checkpoint_root:
+    description: Stream checkpoints and inferred schemas; empty = /Volumes/<catalog>/<bronze_schema>/landing/_checkpoints
+    default: ""
+  cluster_id:
+    description: Existing all-purpose cluster the job runs on (looked up by name)
+    lookup:
+      cluster: BG-Test-Cluster
 
 targets:
   dev:

@@ -1,5 +1,5 @@
 """
-Generate sample CDC Parquet files for the pipeline, plus EXPECTED.md.
+Generate sample CDC Parquet files for the job, plus EXPECTED.md.
 
 Three batches, as a CDC tool would deliver them over three days:
   batch_01_initial_load   every table's starting rows (inserts)
@@ -314,7 +314,7 @@ def write_expected(out: Path):
     lines = [
         "# Expected results",
         "",
-        "Computed from the sample files. Upload one batch, run the pipeline, compare; then the next batch.",
+        "Computed from the sample files. Upload one batch, run the job, compare; then the next batch.",
         "",
         "| Table | SCD | Bronze rows after 1 / 2 / 3 | Silver rows after 1 / 2 / 3 |",
         "|---|---|---|---|",

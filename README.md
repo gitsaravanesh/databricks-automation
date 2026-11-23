@@ -1,12 +1,13 @@
 # bronze_silver
 
-A Spark Declarative Pipeline that loads Parquet files from a landing folder into
+A Databricks job that loads Parquet files from a landing folder into
 **bronze** (raw, as-is) and **silver** (cleaned, one current row per key), packaged
 as a Declarative Automation Bundle with sample data, tests and GitHub Actions CI/CD.
+The job runs on the existing all-purpose cluster **BG-Test-Cluster**.
 
 ```
-landing/incoming/<table>/*.parquet  ──Auto Loader──▶  bronze.<table>  ──AUTO CDC──▶  silver.<table>
-   (temporary landing area)                            raw + lineage cols           latest row per key
+landing/incoming/<table>/*.parquet  ──Auto Loader──▶  bronze.<table>  ──CDC MERGE──▶  silver.<table>
+   (temporary landing area)                            raw + lineage cols            latest row per key
 landing/archive/<table>/   ◀── optional: processed files moved here (clean_source = MOVE)
 ```
 
@@ -16,15 +17,15 @@ landing/archive/<table>/   ◀── optional: processed files moved here (clean
 bronze-silver/
 ├── databricks.yml                      # bundle: variables + dev / test / prod targets
 ├── resources/
-│   ├── bronze_silver.pipeline.yml      # the pipeline definition
-│   └── bronze_silver.job.yml           # daily job that runs the pipeline
-├── src/bronze_silver/                  # pipeline root folder
-│   ├── transformations/                # pipeline source code (every file here is loaded)
-│   │   ├── bronze.py                   # 10 bronze streaming tables (Auto Loader)
-│   │   └── silver.py                   # cleaning views + AUTO CDC / de-duplication
-│   └── utilities/                      # imported by transformations
+│   └── bronze_silver.job.yml           # daily job: bronze task -> silver task, on BG-Test-Cluster
+├── src/bronze_silver/
+│   ├── bronze.py                       # "bronze" task: Auto Loader into 10 bronze tables
+│   ├── silver.py                       # "silver" task: drop missing keys, CDC MERGE / de-duplication
+│   └── utilities/
 │       ├── tables.py                   # the table list: keys, CDC or append, SCD type
-│       └── settings.py                 # pipeline settings + Auto Loader options
+│       ├── settings.py                 # job settings + Auto Loader options
+│       ├── merge.py                    # SCD 1 / SCD 2 MERGE logic
+│       └── streams.py                  # runs each table's stream, restarts it after a schema change
 ├── sample_data/                        # 3 batches of CDC Parquet files + EXPECTED.md
 ├── scripts/
 │   ├── make_sample_data.py             # regenerates sample_data/
@@ -72,6 +73,25 @@ Run `scripts/setup_unity_catalog.sql` once (after replacing `<catalog>` and
 `<sp-application-id>`) to create all schemas and volumes and grant the service
 principal access.
 
+## Compute: BG-Test-Cluster
+
+Both job tasks run on the existing all-purpose cluster `BG-Test-Cluster`. The bundle
+looks it up by name (variable `cluster_id` in `databricks.yml`), so deploy fails if
+no cluster has that name. The job starts the cluster if it is stopped.
+
+- The cluster needs Unity Catalog: access mode **Standard** (shared) or **Dedicated**
+  (single user), Databricks Runtime 14.3 LTS or later.
+- Whoever the job runs as needs **Can Restart** on the cluster (Compute → BG-Test-Cluster
+  → Permissions): you in dev, the service principal in test and prod. A Dedicated
+  cluster only accepts its assigned user or group, so for test and prod use Standard
+  mode or assign it to the service principal.
+- To run dev on a different cluster: `databricks bundle deploy -t dev --var="cluster_id=<id>"`.
+
+Stream progress (which files and bronze rows have been processed) is kept in
+checkpoints under `landing/_checkpoints/` in the bronze schema's volume (variable
+`checkpoint_root`). Deleting a table's checkpoint folder makes the next run reload it
+from scratch.
+
 ## Run it yourself (dev)
 
 ### 1. One-time setup on your laptop
@@ -95,8 +115,7 @@ databricks bundle validate -t dev
 databricks bundle deploy   -t dev
 ```
 
-This creates the pipeline `[dev <you>] bronze_silver` and the job
-`[dev <you>] bronze_silver_job` (schedule paused in dev).
+This creates the job `[dev <you>] bronze_silver_job` (schedule paused in dev).
 
 ### 4. Batch 1: the initial load
 
@@ -112,8 +131,8 @@ Upload the files into the temporary landing area, then run the job:
 databricks bundle run -t dev bronze_silver_job
 ```
 
-Every table loads for the first time. Open the pipeline in the UI to see the graph:
-10 bronze tables feeding 10 silver tables.
+Every table loads for the first time: the `bronze` task, then the `silver` task.
+Each task's output lists the tables it loaded.
 
 ### 5. Batch 2 and batch 3: incremental changes
 
@@ -122,7 +141,7 @@ Repeat with `-Batch 2`, run the job, then `-Batch 3`, run the job. Each run read
 
 - **Updates and deletes:** order 1 goes PLACED → SHIPPED → DELIVERED; order 5 disappears.
 - **Missing key:** an `orders` row with no `order_id` stays in bronze but is dropped
-  from silver. The pipeline's data quality tab shows 1 dropped record.
+  from silver. The silver task's output shows `orders: dropped 1 row(s) with a missing key`.
 - **Out-of-order event:** batch 3 brings an older "CANCELLED" for order 2. It's
   ignored because its commit time is older than the "SHIPPED" already applied.
 - **History (SCD 2):** customer 1 ends with 3 versions; customer 4 is closed, not removed.
@@ -139,9 +158,9 @@ databricks bundle deploy -t dev --var="clean_source=MOVE" --var="archive_after=1
 Auto Loader then moves each processed file to `landing/archive/<table>/` once it is
 older than `archive_after`. Moving happens during later runs that have new files, and
 a file becomes eligible two runs after it was loaded at the earliest. It needs a
-recent runtime; if the pipeline rejects the option, leave `clean_source` at `OFF`.
-Because files may leave the landing area, bronze has `pipelines.reset.allowed = false`
-so a full refresh can't empty it.
+recent runtime on the cluster; if Auto Loader rejects the option, leave `clean_source`
+at `OFF`. Once files have been moved, don't delete bronze tables or their checkpoints:
+the files can't be reloaded from the landing area.
 
 ### 7. Clean up
 
@@ -150,7 +169,7 @@ databricks bundle destroy -t dev
 ```
 ```sql
 DROP SCHEMA IF EXISTS <catalog>.dev_silver CASCADE;
-DROP SCHEMA IF EXISTS <catalog>.dev_bronze CASCADE;
+DROP SCHEMA IF EXISTS <catalog>.dev_bronze CASCADE;   -- also removes the landing volume and checkpoints
 ```
 
 ---
@@ -164,7 +183,9 @@ pytest -q
 ```
 
 The tests check the table list (unique folders, keys, valid SCD types), the settings
-and Auto Loader options, and that every sample file has the columns the pipeline needs.
+and Auto Loader options, the stream runner, and that every sample file has the columns
+the job needs. They don't need Spark; the MERGE logic is checked by running the job
+against the sample batches and comparing with `sample_data/EXPECTED.md`.
 To regenerate the sample data: `python scripts/make_sample_data.py`.
 
 ## CI/CD (GitHub Actions)
@@ -182,7 +203,7 @@ Setup:
    (Settings → Identity and access → Service principals → Manage → Add, then the
    **Secrets** tab → Generate secret). Copy the client ID and the secret.
 2. Run `scripts/setup_unity_catalog.sql` with its application ID, so it can use the
-   test and prod schemas and volumes.
+   test and prod schemas and volumes, and give it **Can Restart** on BG-Test-Cluster.
 3. In GitHub, add the repository secrets `DATABRICKS_CLIENT_ID` and
    `DATABRICKS_CLIENT_SECRET` (Settings → Secrets and variables → Actions).
 4. Create the environments `test` and `production` (Settings → Environments). On
@@ -237,7 +258,5 @@ recently use a format with numeric IDs, so check GitHub's OIDC docs for yours.
 
 1. Add an 11th table: a folder of Parquet files plus one line in `tables.py`.
 2. Switch `orders` to SCD 2 and compare the history after all three batches
-   (needs a full refresh of `silver.orders` to rebuild it).
+   (drop `silver.orders` and delete `_checkpoints/silver/orders` to rebuild it).
 3. Add a new column to a batch-4 file and watch the stream pick up the schema change.
-4. Set `continuous: true` in the pipeline YAML, remove the job, and drop files in
-   while it runs.

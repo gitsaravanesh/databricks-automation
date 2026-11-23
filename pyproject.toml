@@ -1,7 +1,7 @@
 [project]
 name = "bronze-silver"
 version = "0.1.0"
-description = "Spark Declarative Pipeline: landing Parquet -> bronze -> silver"
+description = "Databricks job: landing Parquet -> bronze -> silver"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]

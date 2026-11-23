@@ -26,9 +26,12 @@ GRANT USE SCHEMA, CREATE TABLE ON SCHEMA <catalog>.test_silver TO `<sp-applicati
 GRANT USE SCHEMA, CREATE TABLE ON SCHEMA <catalog>.bronze      TO `<sp-application-id>`;
 GRANT USE SCHEMA, CREATE TABLE ON SCHEMA <catalog>.silver      TO `<sp-application-id>`;
 
--- READ to load files; WRITE only matters if clean_source = MOVE
+-- READ to load files; WRITE for stream checkpoints (landing/_checkpoints) and clean_source = MOVE
 GRANT READ VOLUME, WRITE VOLUME ON VOLUME <catalog>.test_bronze.landing TO `<sp-application-id>`;
 GRANT READ VOLUME, WRITE VOLUME ON VOLUME <catalog>.bronze.landing      TO `<sp-application-id>`;
+
+-- The service principal also needs Can Restart on the cluster BG-Test-Cluster
+-- (Compute > BG-Test-Cluster > Permissions); that isn't a SQL grant.
 
 -- 3. Check ---------------------------------------------------------------------
 SHOW GRANTS `<sp-application-id>` ON SCHEMA <catalog>.bronze;

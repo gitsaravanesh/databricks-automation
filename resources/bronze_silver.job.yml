@@ -1,15 +1,35 @@
-# The job that runs the pipeline on a schedule.
+# The job that loads bronze and then silver, on the existing cluster BG-Test-Cluster.
 # In the dev target, development mode pauses the schedule.
+# Paths are relative to this file.
 
 resources:
   jobs:
     bronze_silver_job:
       name: bronze_silver_job
+      max_concurrent_runs: 1                # two runs at once would share checkpoints
       tasks:
-        - task_key: refresh_pipeline
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.bronze_silver.id}
-            full_refresh: false             # normal incremental run
+        - task_key: bronze
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: ../src/bronze_silver/bronze.py
+            parameters: &settings           # read in code with utilities.settings.parse_args
+              - --catalog=${var.catalog}
+              - --bronze_schema=${var.bronze_schema}
+              - --silver_schema=${var.silver_schema}
+              - --source_root=${var.source_root}
+              - --archive_root=${var.archive_root}
+              - --clean_source=${var.clean_source}
+              - --archive_after=${var.archive_after}
+              - --checkpoint_root=${var.checkpoint_root}
+
+        - task_key: silver
+          depends_on:
+            - task_key: bronze
+          existing_cluster_id: ${var.cluster_id}
+          spark_python_task:
+            python_file: ../src/bronze_silver/silver.py
+            parameters: *settings
+
       schedule:
         quartz_cron_expression: "0 30 1 * * ?"   # 01:30 every day
         timezone_id: Asia/Kolkata

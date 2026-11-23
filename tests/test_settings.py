@@ -2,7 +2,7 @@
 
 import pytest
 
-from utilities.settings import autoloader_options, get_settings
+from utilities.settings import autoloader_options, get_settings, parse_args
 
 BASE = {
     "source_root": "/Volumes/workspace/dev_bronze/landing/incoming/",
@@ -52,3 +52,26 @@ def test_landing_defaults_to_volume_in_bronze_schema():
 def test_cloud_storage_paths_are_used_when_given():
     s = get_settings({**BASE, "source_root": "abfss://landing@acct.dfs.core.windows.net/incoming/"})
     assert s.source_path("orders") == "abfss://landing@acct.dfs.core.windows.net/incoming/orders/"
+
+
+def test_parse_args_reads_job_parameters():
+    args = parse_args(["--catalog=main", "--source_root=", "--archive_after=30 days"])
+    assert args == {"catalog": "main", "source_root": "", "archive_after": "30 days"}
+
+
+def test_parse_args_rejects_other_formats():
+    with pytest.raises(ValueError):
+        parse_args(["catalog=main"])
+
+
+def test_checkpoints_default_to_landing_volume():
+    s = get_settings({**BASE, "checkpoint_root": ""})
+    assert s.checkpoint_path("silver", "orders") == "/Volumes/workspace/dev_bronze/landing/_checkpoints/silver/orders"
+    opts = autoloader_options(s, "orders")
+    assert opts["cloudFiles.schemaLocation"] == s.checkpoint_path("bronze", "orders")
+
+
+def test_checkpoints_inside_source_are_rejected():
+    bad = {**BASE, "checkpoint_root": "/Volumes/workspace/dev_bronze/landing/incoming/_checkpoints"}
+    with pytest.raises(ValueError):
+        autoloader_options(get_settings(bad), "orders")
