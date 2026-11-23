@@ -24,7 +24,7 @@ workspace:
 variables:
   catalog:
     description: Unity Catalog catalog for all targets (check the name in Catalog Explorer)
-    default: <your-catalog>
+    default: practice_catalog
   bronze_schema:
     description: Schema for bronze tables (must already exist)
   silver_schema:
